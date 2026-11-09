@@ -18,6 +18,7 @@ type Task struct {
 type TaskStore interface {
 	List() []Task
 	Create(task Task)
+	Change(task Task)
 }
 
 type SliceStore struct {
@@ -35,6 +36,17 @@ func (store *SliceStore) Create(task Task) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.tasks = append(store.tasks, task)
+}
+
+func (store *SliceStore) Change(task Task) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for i, t := range store.tasks {
+		if t.ID == task.ID {
+			store.tasks[i] = task
+			return
+		}
+	}
 }
 
 type Server struct {
@@ -91,6 +103,38 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleChangeTask(w http.ResponseWriter, r *http.Request) {
+	// log.Printf("PUT id=%q", r.PathValue("id"))
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var in struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	tasks := s.store.List()
+	if id < 1 || id > len(tasks) {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+
+	tasks[id-1] = Task{
+		ID:          id,
+		Title:       in.Title,
+		Description: in.Description,
+	}
+	s.store.Change(tasks[id-1])
+}
+
 func main() {
 
 	tasks := []Task{
@@ -103,6 +147,8 @@ func main() {
 	http.HandleFunc("/ping", server.handlePing)
 	http.HandleFunc("GET  /tasks", server.handleListTasks)
 	http.HandleFunc("GET /tasks/{id}", server.handleGetTask)
+	http.HandleFunc("PUT /tasks/{id}", server.handleChangeTask)
+	//http.HandleFunc("DELETE /tasks/{id}", server.handleDeleteTask)
 	http.HandleFunc("POST /tasks", server.handleCreateTask)
 
 	fmt.Println("Server is running on http://localhost:8080")
