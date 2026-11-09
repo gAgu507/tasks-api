@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"sync"
 )
 
 type Task struct {
@@ -13,31 +15,96 @@ type Task struct {
 	Completed   bool   `json:"completed"`
 }
 
-func handlerRoot(w http.ResponseWriter, r *http.Request) {
+type TaskStore interface {
+	List() []Task
+	Create(task Task)
+}
+
+type SliceStore struct {
+	mu    sync.Mutex
+	tasks []Task
+}
+
+func (store *SliceStore) List() []Task {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return append([]Task(nil), store.tasks...)
+}
+
+func (store *SliceStore) Create(task Task) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.tasks = append(store.tasks, task)
+}
+
+type Server struct {
+	store TaskStore
+}
+
+func (s *Server) handlerRoot(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "You've reached the root endpoint!")
 }
 
-func handlePing(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.store.List())
+}
+
+func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.store.List()[id-1])
+
+}
+
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	status := map[string]string{"status": "ok"}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
 
 }
 
-func handleListTasks(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if in.Title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+	s.store.Create(Task{
+		ID:          len(s.store.List()) + 1,
+		Title:       in.Title,
+		Description: in.Description,
+		Completed:   false,
+	})
+}
+
+func main() {
+
 	tasks := []Task{
 		{ID: 1, Title: "Task 1", Description: "Description for Task 1", Completed: false},
 		{ID: 2, Title: "Task 2", Description: "Description for Task 2", Completed: true},
 	}
+	server := &Server{store: &SliceStore{tasks: tasks}}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tasks)
-}
+	http.HandleFunc("/", server.handlerRoot)
+	http.HandleFunc("/ping", server.handlePing)
+	http.HandleFunc("GET  /tasks", server.handleListTasks)
+	http.HandleFunc("GET /tasks/{id}", server.handleGetTask)
+	http.HandleFunc("POST /tasks", server.handleCreateTask)
 
-func main() {
-	http.HandleFunc("/", handlerRoot)
-	http.HandleFunc("/ping", handlePing)
-	http.HandleFunc("GET  /tasks", handleListTasks)
 	fmt.Println("Server is running on http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 }
