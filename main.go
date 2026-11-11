@@ -19,6 +19,7 @@ type TaskStore interface {
 	List() []Task
 	Create(task Task)
 	Change(task Task)
+	Delete(id int)
 }
 
 type SliceStore struct {
@@ -44,6 +45,17 @@ func (store *SliceStore) Change(task Task) {
 	for i, t := range store.tasks {
 		if t.ID == task.ID {
 			store.tasks[i] = task
+			return
+		}
+	}
+}
+
+func (store *SliceStore) Delete(id int) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for i, t := range store.tasks {
+		if t.ID == id {
+			store.tasks = append(store.tasks[:i], store.tasks[i+1:]...)
 			return
 		}
 	}
@@ -103,8 +115,17 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.store.Delete(id)
+}
+
 func (s *Server) handleChangeTask(w http.ResponseWriter, r *http.Request) {
-	// log.Printf("PUT id=%q", r.PathValue("id"))
 	idStr := r.PathValue("id")
 	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
 	if err != nil {
@@ -148,7 +169,7 @@ func main() {
 	http.HandleFunc("GET  /tasks", server.handleListTasks)
 	http.HandleFunc("GET /tasks/{id}", server.handleGetTask)
 	http.HandleFunc("PUT /tasks/{id}", server.handleChangeTask)
-	//http.HandleFunc("DELETE /tasks/{id}", server.handleDeleteTask)
+	http.HandleFunc("DELETE /tasks/{id}", server.handleDeleteTask)
 	http.HandleFunc("POST /tasks", server.handleCreateTask)
 
 	fmt.Println("Server is running on http://localhost:8080")
