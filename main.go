@@ -24,8 +24,8 @@ type Task struct {
 }
 
 type TaskStore interface {
-	List(context.Context) []Task
-	Create(context.Context, Task)
+	List(context.Context) ([]Task, error)
+	Create(context.Context, Task) error
 	Change(context.Context, Task) error
 	Delete(context.Context, int) error
 	Get(context.Context, int) (Task, error)
@@ -76,11 +76,11 @@ type PostgresStore struct {
 	pool *pgxpool.Pool
 }
 
-func (store *PostgresStore) List(ctx context.Context) []Task {
+func (store *PostgresStore) List(ctx context.Context) ([]Task, error) {
 	rows, err := store.pool.Query(ctx, "SELECT id, title, description, completed FROM tasks")
 	if err != nil {
 		fmt.Println("Error querying tasks:", err)
-		return nil
+		return nil, err
 	}
 
 	defer rows.Close()
@@ -89,30 +89,33 @@ func (store *PostgresStore) List(ctx context.Context) []Task {
 	for rows.Next() {
 		var task Task
 		if err := rows.Scan(&task.ID, &task.Title, &task.Description, &task.Completed); err != nil {
-			fmt.Println("Error scanning task:", err)
-			return nil
+			// log.Println("Error scanning task:", err)
+			return nil, err
 		}
 		tasks = append(tasks, task)
 	}
 
 	if err := rows.Err(); err != nil {
-		fmt.Println("Error iterating over rows:", err)
-		return nil
+		// log.Println("Error iterating over rows:", err)
+		return nil, err
 	}
 
-	return tasks
+	return tasks, nil
 }
 
-func (store *PostgresStore) Create(ctx context.Context, task Task) {
+func (store *PostgresStore) Create(ctx context.Context, task Task) error {
 	_, err := store.pool.Exec(ctx, "INSERT INTO tasks (title, description, completed) VALUES ($1, $2, $3)", task.Title, task.Description, task.Completed)
 	if err != nil {
-		fmt.Println("Error inserting task:", err)
+		// log.Println("Error inserting task:", err)
+		return err
 	}
+	return nil
 }
 
 func (store *PostgresStore) Change(ctx context.Context, task Task) error {
 	tag, err := store.pool.Exec(ctx, "UPDATE tasks SET title=$1, description=$2, completed=$3 WHERE id=$4", task.Title, task.Description, task.Completed, task.ID)
 	if err != nil {
+		log.Println("Error updating task:", err)
 		return err
 	}
 	if tag.RowsAffected() == 0 {
@@ -124,6 +127,7 @@ func (store *PostgresStore) Change(ctx context.Context, task Task) error {
 func (store *PostgresStore) Delete(ctx context.Context, id int) error {
 	tag, err := store.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
 	if err != nil {
+		log.Println("Error deleting task:", err)
 		return err
 	}
 	if tag.RowsAffected() == 0 {
@@ -155,7 +159,12 @@ func (s *Server) handlerRoot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.store.List(r.Context()))
+	tasks, err := s.store.List(r.Context())
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(tasks)
 }
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
@@ -200,12 +209,22 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
-	s.store.Create(r.Context(), Task{
-		ID:          len(s.store.List(r.Context())) + 1,
+	tasks, err := s.store.List(r.Context())
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	id := tasks[len(tasks)-1].ID + 1
+	err = s.store.Create(r.Context(), Task{
+		ID:          id,
 		Title:       in.Title,
 		Description: in.Description,
 		Completed:   false,
 	})
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) handleChangeTask(w http.ResponseWriter, r *http.Request) {
