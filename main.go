@@ -3,14 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrNotFound = errors.New("task not found")
 
 type Task struct {
 	ID          int    `json:"id"`
@@ -22,48 +26,51 @@ type Task struct {
 type TaskStore interface {
 	List(context.Context) []Task
 	Create(context.Context, Task)
-	Change(context.Context, Task)
-	Delete(context.Context, int)
+	Change(context.Context, Task) error
+	Delete(context.Context, int) error
+	Get(context.Context, int) (Task, error)
 }
 
-type SliceStore struct {
-	mu    sync.Mutex
-	tasks []Task
-}
+// type SliceStore struct {
+// 	mu    sync.Mutex
+// 	tasks []Task
+// }
 
-func (store *SliceStore) List(ctx context.Context) []Task {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	return append([]Task(nil), store.tasks...)
-}
+// func (store *SliceStore) List(ctx context.Context) []Task {
+// 	store.mu.Lock()
+// 	defer store.mu.Unlock()
+// 	return append([]Task(nil), store.tasks...)
+// }
 
-func (store *SliceStore) Create(ctx context.Context, task Task) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.tasks = append(store.tasks, task)
-}
+// func (store *SliceStore) Create(ctx context.Context, task Task) {
+// 	store.mu.Lock()
+// 	defer store.mu.Unlock()
+// 	store.tasks = append(store.tasks, task)
+// }
 
-func (store *SliceStore) Change(ctx context.Context, task Task) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	for i, t := range store.tasks {
-		if t.ID == task.ID {
-			store.tasks[i] = task
-			return
-		}
-	}
-}
+// func (store *SliceStore) Change(ctx context.Context, task Task) error {
+// 	store.mu.Lock()
+// 	defer store.mu.Unlock()
+// 	for i, t := range store.tasks {
+// 		if t.ID == task.ID {
+// 			store.tasks[i] = task
+// 			return nil
+// 		}
+// 	}
+// 	return ErrNotFound
+// }
 
-func (store *SliceStore) Delete(id int) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	for i, t := range store.tasks {
-		if t.ID == id {
-			store.tasks = append(store.tasks[:i], store.tasks[i+1:]...)
-			return
-		}
-	}
-}
+// func (store *SliceStore) Delete(id int) error {
+// 	store.mu.Lock()
+// 	defer store.mu.Unlock()
+// 	for i, t := range store.tasks {
+// 		if t.ID == id {
+// 			store.tasks = append(store.tasks[:i], store.tasks[i+1:]...)
+// 			return nil
+// 		}
+// 	}
+// 	return ErrNotFound
+// }
 
 type PostgresStore struct {
 	pool *pgxpool.Pool
@@ -103,18 +110,39 @@ func (store *PostgresStore) Create(ctx context.Context, task Task) {
 	}
 }
 
-func (store *PostgresStore) Change(ctx context.Context, task Task) {
-	_, err := store.pool.Exec(ctx, "UPDATE tasks SET title=$1, description=$2, completed=$3 WHERE id=$4", task.Title, task.Description, task.Completed, task.ID)
+func (store *PostgresStore) Change(ctx context.Context, task Task) error {
+	tag, err := store.pool.Exec(ctx, "UPDATE tasks SET title=$1, description=$2, completed=$3 WHERE id=$4", task.Title, task.Description, task.Completed, task.ID)
 	if err != nil {
-		fmt.Println("Error updating task:", err)
+		return err
 	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
-func (store *PostgresStore) Delete(ctx context.Context, id int) {
-	_, err := store.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
+func (store *PostgresStore) Delete(ctx context.Context, id int) error {
+	tag, err := store.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
 	if err != nil {
-		fmt.Println("Error deleting task:", err)
+		return err
 	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (store *PostgresStore) Get(ctx context.Context, id int) (Task, error) {
+	var task Task
+	row := store.pool.QueryRow(ctx, "SELECT id, title, description, completed FROM tasks WHERE id=$1", id)
+	err := row.Scan(&task.ID, &task.Title, &task.Description, &task.Completed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Task{}, ErrNotFound
+	}
+	if err != nil {
+		return Task{}, err
+	}
+	return task, nil
 }
 
 type Server struct {
@@ -132,15 +160,24 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+
+	task, err := s.store.Get(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.store.List(r.Context())[id-1])
-
+	json.NewEncoder(w).Encode(task)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -173,50 +210,57 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleChangeTask(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
 
 	var in struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
+		Completed   bool   `json:"completed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	tasks := s.store.List(r.Context())
-	if id < 1 || id > len(tasks) {
-		http.Error(w, "task not found", http.StatusNotFound)
-		return
-	}
-
-	tasks[id-1] = Task{
+	err = s.store.Change(r.Context(), Task{
 		ID:          id,
 		Title:       in.Title,
 		Description: in.Description,
+		Completed:   in.Completed,
+	})
+	if errors.Is(err, ErrNotFound) {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
 	}
-	s.store.Change(r.Context(), tasks[id-1])
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr[1 : len(idStr)-1])
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
 
-	tasks := s.store.List(r.Context())
-	if id < 1 || id > len(tasks) {
+	err = s.store.Delete(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
-
-	s.store.Delete(r.Context(), id)
+	if err != nil {
+		log.Println("Error deleting task:", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
