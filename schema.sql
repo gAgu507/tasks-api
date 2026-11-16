@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS tasks (
+    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    completed   BOOLEAN NOT NULL DEFAULT false
+);
