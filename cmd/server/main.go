@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gAgu507/tasks-api/internal/config"
+	"github.com/gAgu507/tasks-api/internal/handlers"
+	"github.com/gAgu507/tasks-api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -51,8 +54,13 @@ import (
 // }
 
 func main() {
-	ctx := context.Background()
 
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatal("connect to db: ", err)
@@ -63,7 +71,7 @@ func main() {
 		log.Fatal("ping db: ", err)
 	}
 
-	server := &Server{store: &PostgresStore{pool: pool}}
+	srv := handlers.NewServer(store.NewPostgres(pool))
 
 	// tasks := []Task{
 	// 	{ID: 1, Title: "Task 1", Description: "Description for Task 1", Completed: false},
@@ -71,14 +79,6 @@ func main() {
 	// }
 	// server := &Server{store: &SliceStore{tasks: tasks}}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", server.handlerRoot)
-	mux.HandleFunc("GET  /tasks", server.handleListTasks)
-	mux.HandleFunc("GET /tasks/{id}", server.handleGetTask)
-	mux.HandleFunc("PUT /tasks/{id}", server.handleChangeTask)
-	mux.HandleFunc("DELETE /tasks/{id}", server.handleDeleteTask)
-	mux.HandleFunc("POST /tasks", server.handleCreateTask)
-
-	log.Println("Server is running on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Println("Server is running on http://localhost:" + cfg.Port)
+	log.Fatal(http.ListenAndServe(":"+cfg.Port, srv.Routes()))
 }

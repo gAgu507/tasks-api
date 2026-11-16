@@ -1,4 +1,4 @@
-package main
+package handlers
 
 import (
 	"encoding/json"
@@ -6,10 +6,27 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/gAgu507/tasks-api/internal/store"
 )
 
 type Server struct {
-	store TaskStore
+	store store.TaskStore
+}
+
+func NewServer(s store.TaskStore) *Server {
+	return &Server{store: s}
+}
+
+func (s *Server) Routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handlerRoot)
+	mux.HandleFunc("GET /tasks", s.handleListTasks)
+	mux.HandleFunc("POST /tasks", s.handleCreateTask)
+	mux.HandleFunc("GET /tasks/{id}", s.handleGetTask)
+	mux.HandleFunc("PUT /tasks/{id}", s.handleChangeTask)
+	mux.HandleFunc("DELETE /tasks/{id}", s.handleDeleteTask)
+	return mux
 }
 
 func (s *Server) handlerRoot(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +52,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	task, err := s.store.Get(r.Context(), id)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
@@ -61,7 +78,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
-	task, err := s.store.Create(r.Context(), Task{
+	task, err := s.store.Create(r.Context(), store.Task{
 		Title:       in.Title,
 		Description: in.Description,
 	})
@@ -92,13 +109,13 @@ func (s *Server) handleChangeTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.store.Change(r.Context(), Task{
+	err = s.store.Change(r.Context(), store.Task{
 		ID:          id,
 		Title:       in.Title,
 		Description: in.Description,
 		Completed:   in.Completed,
 	})
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
@@ -119,7 +136,7 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = s.store.Delete(r.Context(), id)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
