@@ -1,11 +1,18 @@
 # Tasks API
 
-Простой REST API для списка задач на Go с хранением данных в PostgreSQL. Учебный проект: CRUD, работа с базой через `pgx`, обработка ошибок и коды ответов HTTP.
+Простой REST API для списка задач на Go с хранением данных в PostgreSQL. Учебный проект: CRUD, работа с базой через `pgx`, миграции, тесты обработчиков, обработка ошибок и коды ответов HTTP.
 
 ## Что нужно
 
 - Go 1.22 или новее (в проекте используется маршрутизация по методам и параметры пути из стандартной библиотеки)
 - PostgreSQL
+- [goose](https://github.com/pressly/goose) для миграций базы:
+
+  ```bash
+  go install github.com/pressly/goose/v3/cmd/goose@latest
+  ```
+
+  Если команда `goose` не находится, добавь папку `go/bin` в `PATH` (`~/go/bin` на Linux, `%USERPROFILE%\go\bin` на Windows).
 
 ## Запуск
 
@@ -16,11 +23,10 @@
    cd tasks-api
    ```
 
-2. Создать базу данных и применить схему:
+2. Создать базу данных:
 
    ```bash
    createdb tasks
-   psql -d tasks -f schema.sql
    ```
 
    Если `createdb` не находит пользователя, создай базу через `psql` от имени суперпользователя (на Linux обычно `sudo -u postgres psql`).
@@ -39,7 +45,15 @@
    $env:DATABASE_URL = "postgres://пользователь:пароль@localhost:5432/tasks"
    ```
 
-4. Запустить сервер:
+4. Применить миграции (создаёт структуру таблиц):
+
+   ```bash
+   goose -dir migrations postgres "$DATABASE_URL" up
+   ```
+
+   В PowerShell: `goose -dir migrations postgres $env:DATABASE_URL up`.
+
+5. Запустить сервер:
 
    ```bash
    go run ./cmd/server
@@ -63,6 +77,42 @@ PORT=9090 go run ./cmd/server
 ```
 
 В PowerShell переменная задаётся отдельной строкой: `$env:PORT = "9090"`.
+
+## Миграции
+
+Структура базы описана миграциями в папке `migrations/`: это пронумерованные SQL-файлы, каждый с одним изменением. Утилита goose помнит, какие из них уже применены, и накатывает только новые.
+
+```bash
+goose -dir migrations postgres "$DATABASE_URL" status   # что применено
+goose -dir migrations postgres "$DATABASE_URL" up       # применить новые
+goose -dir migrations postgres "$DATABASE_URL" down     # откатить последнюю
+```
+
+Новая миграция создаётся командой:
+
+```bash
+goose -dir migrations create название_изменения sql
+```
+
+Уже применённые миграции не редактируются: исправление оформляется новой миграцией.
+
+## Тесты
+
+```bash
+go test ./...
+```
+
+Тесты обработчиков работают без базы данных и сети: вместо PostgreSQL подставляется фальшивое хранилище в памяти, которое реализует интерфейс `TaskStore`. Подробный вывод по каждому случаю:
+
+```bash
+go test ./internal/handlers -v
+```
+
+Покрытие кода:
+
+```bash
+go test -cover ./...
+```
 
 ## Адреса
 
@@ -125,19 +175,20 @@ curl -X DELETE http://localhost:8080/tasks/1
 ## Структура проекта
 
 ```
-cmd/server/main.go            точка входа: настройки, подключение к базе, запуск
-internal/config/config.go     чтение переменных окружения
-internal/store/store.go       структура Task, ошибка ErrNotFound, интерфейс TaskStore
-internal/store/postgres.go    реализация хранилища на PostgreSQL
-internal/handlers/handlers.go обработчики HTTP-запросов и маршруты
-internal/handlers/response.go вспомогательные функции для JSON-ответов
-schema.sql                    структура таблицы
+cmd/server/main.go                точка входа: настройки, подключение к базе, запуск
+internal/config/config.go         чтение переменных окружения
+internal/store/store.go           структура Task, ошибка ErrNotFound, интерфейс TaskStore
+internal/store/postgres.go        реализация хранилища на PostgreSQL
+internal/handlers/handlers.go     обработчики HTTP-запросов и маршруты
+internal/handlers/response.go     вспомогательные функции для JSON-ответов
+internal/handlers/*_test.go       тесты обработчиков и фальшивое хранилище
+migrations/                       миграции базы данных (goose)
 ```
 
 ## Планы
 
-- Тесты обработчиков
-- Миграции вместо `schema.sql`
 - Docker и `docker compose`
 - Авторизация (регистрация, вход, JWT)
 - Фильтры и постраничный вывод
+- Логирование через `slog`, корректная остановка сервера
+- CI на GitHub Actions
