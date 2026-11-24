@@ -20,7 +20,7 @@ COPY --from=goose /go/bin/goose /goose
 COPY migrations /migrations
 ENTRYPOINT ["/goose"]
 
-# Стадия 2: итоговый образ
+# Стадия 4: итоговый образ сервера
 FROM alpine:3
 COPY --from=build /out/server /server
 EXPOSE 8080

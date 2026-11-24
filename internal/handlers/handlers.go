@@ -6,16 +6,19 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gAgu507/tasks-api/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
 	store store.TaskStore
+	users store.UserStore
 }
 
-func NewServer(s store.TaskStore) *Server {
-	return &Server{store: s}
+func NewServer(tasks store.TaskStore, users store.UserStore) *Server {
+	return &Server{store: tasks, users: users}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -26,9 +29,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /tasks/{id}", s.handleGetTask)
 	mux.HandleFunc("PUT /tasks/{id}", s.handleChangeTask)
 	mux.HandleFunc("DELETE /tasks/{id}", s.handleDeleteTask)
+	mux.HandleFunc("POST /register", s.handleRegister)
 	return mux
 }
 
+// Part with handlers for Tasks.
 func (s *Server) handlerRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -146,4 +151,46 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Part with handlers for Users.
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+	if !strings.Contains(email, "@") {
+		http.Error(w, "invalid email", http.StatusBadRequest)
+		return
+	}
+	if len(in.Password) < 8 || len(in.Password) > 72 {
+		http.Error(w, "password must be 8-72 characters", http.StatusBadRequest)
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Println("hash password:", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	user, err := s.users.CreateUser(r.Context(), email, string(hash))
+	if errors.Is(err, store.ErrEmailTaken) {
+		http.Error(w, "email already registered", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		log.Println("create user:", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"id": user.ID, "email": user.Email})
 }

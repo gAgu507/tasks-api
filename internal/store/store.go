@@ -6,6 +6,7 @@ import (
 )
 
 var ErrNotFound = errors.New("task not found")
+var ErrEmailTaken = errors.New("email already registered")
 
 type Task struct {
 	ID          int    `json:"id"`
@@ -20,4 +21,14 @@ type TaskStore interface {
 	Change(context.Context, Task) error
 	Delete(context.Context, int) error
 	Get(context.Context, int) (Task, error)
+}
+
+type User struct {
+	ID           int
+	Email        string
+	PasswordHash string
+}
+
+type UserStore interface {
+	CreateUser(ctx context.Context, email, passwordHash string) (User, error)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -14,6 +15,20 @@ type Postgres struct {
 
 func NewPostgres(pool *pgxpool.Pool) *Postgres {
 	return &Postgres{pool: pool}
+}
+
+func (s *Postgres) CreateUser(ctx context.Context, email, hash string) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO users (email, password_hash) VALUES ($1, $2)
+		 RETURNING id, email, password_hash`, email, hash,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash)
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // нарушение UNIQUE
+		return User{}, ErrEmailTaken
+	}
+	return u, err
 }
 
 func (store *Postgres) List(ctx context.Context) ([]Task, error) {

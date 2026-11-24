@@ -35,7 +35,8 @@ func main() {
 		log.Fatal("ping db: ", err)
 	}
 
-	srv := handlers.NewServer(store.NewPostgres(pool))
+	pg := store.NewPostgres(pool)
+	srv := handlers.NewServer(pg, pg)
 
 	log.Println("Server is running on http://localhost:" + cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, srv.Routes()))
