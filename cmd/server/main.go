@@ -10,9 +10,14 @@ import (
 	"github.com/gAgu507/tasks-api/internal/handlers"
 	"github.com/gAgu507/tasks-api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+
+	if err := godotenv.Load(); err != nil {
+		log.Println("godotenv:", err)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {

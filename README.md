@@ -6,7 +6,7 @@
 
 - Go 1.22 или новее (в проекте используется маршрутизация по методам и параметры пути из стандартной библиотеки)
 - PostgreSQL
-- [goose](https://github.com/pressly/goose) для миграций базы:
+- [goose](https://github.com/pressly/goose) версии 3.24.0 или новее для миграций базы (эта версия умеет читать настройки из `.env`):
 
   ```bash
   go install github.com/pressly/goose/v3/cmd/goose@latest
@@ -31,27 +31,27 @@
 
    Если `createdb` не находит пользователя, создай базу через `psql` от имени суперпользователя (на Linux обычно `sudo -u postgres psql`).
 
-3. Задать настройки через переменные окружения (см. таблицу ниже).
+3. Создать файл настроек из шаблона и подставить свои значения (пользователь, пароль, имя базы):
 
    Linux / macOS / Git Bash:
 
    ```bash
-   export DATABASE_URL="postgres://пользователь:пароль@localhost:5432/tasks"
+   cp .env.example .env
    ```
 
    PowerShell:
 
    ```powershell
-   $env:DATABASE_URL = "postgres://пользователь:пароль@localhost:5432/tasks"
+   copy .env.example .env
    ```
+
+   Файл `.env` содержит пароли и не попадает в Git. Подробности в разделе «Настройки».
 
 4. Применить миграции (создаёт структуру таблиц):
 
    ```bash
-   goose -dir migrations postgres "$DATABASE_URL" up
+   goose up
    ```
-
-   В PowerShell: `goose -dir migrations postgres $env:DATABASE_URL up`.
 
 5. Запустить сервер:
 
@@ -63,14 +63,32 @@
 
 ## Настройки
 
+Настройки читаются из файла `.env` в корне проекта. Шаблон лежит в `.env.example`. Запускать сервер и `goose` нужно из корня проекта, где лежит этот файл.
+
 | Переменная | Обязательна | По умолчанию | Описание |
 |------------|-------------|--------------|----------|
-| `DATABASE_URL` | да | | Строка подключения к PostgreSQL |
+| `DATABASE_URL` | да | | Строка подключения к PostgreSQL для сервера |
 | `PORT` | нет | `8080` | Порт, на котором слушает сервер |
+| `GOOSE_DRIVER` | для миграций | | Драйвер базы для goose, здесь `postgres` |
+| `GOOSE_DBSTRING` | для миграций | | Строка подключения к базе для goose |
+| `GOOSE_MIGRATION_DIR` | для миграций | | Папка с миграциями, здесь `./migrations` |
 
-Без `DATABASE_URL` сервер сообщает об этом и завершает работу.
+Пример `.env`:
 
-Пример с другим портом:
+```
+DATABASE_URL=postgres://пользователь:пароль@localhost:5432/tasks
+PORT=8080
+
+GOOSE_DRIVER=postgres
+GOOSE_DBSTRING=postgres://пользователь:пароль@localhost:5432/tasks
+GOOSE_MIGRATION_DIR=./migrations
+```
+
+Правила записи: без пробелов вокруг `=` и без кавычек. Спецсимволы в пароле (`@`, `:`, `/`, `#`) нужно кодировать в адресе, например `@` как `%40`.
+
+Переменные, заданные в окружении (например, через `export` или в Docker), главнее значений из `.env`. Если файла `.env` нет, сервер берёт настройки только из окружения. Без `DATABASE_URL` сервер сообщает об этом и завершает работу.
+
+Пример с другим портом без правки файла:
 
 ```bash
 PORT=9090 go run ./cmd/server
@@ -80,18 +98,18 @@ PORT=9090 go run ./cmd/server
 
 ## Миграции
 
-Структура базы описана миграциями в папке `migrations/`: это пронумерованные SQL-файлы, каждый с одним изменением. Утилита goose помнит, какие из них уже применены, и накатывает только новые.
+Структура базы описана миграциями в папке `migrations/`: это пронумерованные SQL-файлы, каждый с одним изменением. Утилита goose помнит, какие из них уже применены, и накатывает только новые. Настройки подключения она берёт из `.env`.
 
 ```bash
-goose -dir migrations postgres "$DATABASE_URL" status   # что применено
-goose -dir migrations postgres "$DATABASE_URL" up       # применить новые
-goose -dir migrations postgres "$DATABASE_URL" down     # откатить последнюю
+goose status   # что применено
+goose up       # применить новые
+goose down     # откатить последнюю
 ```
 
 Новая миграция создаётся командой:
 
 ```bash
-goose -dir migrations create название_изменения sql
+goose create название_изменения sql
 ```
 
 Уже применённые миграции не редактируются: исправление оформляется новой миграцией.
@@ -183,6 +201,7 @@ internal/handlers/handlers.go     обработчики HTTP-запросов �
 internal/handlers/response.go     вспомогательные функции для JSON-ответов
 internal/handlers/*_test.go       тесты обработчиков и фальшивое хранилище
 migrations/                       миграции базы данных (goose)
+.env.example                      шаблон настроек (сам .env в Git не попадает)
 ```
 
 ## Планы
