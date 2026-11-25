@@ -26,14 +26,17 @@ func NewServer(tasks store.TaskStore, users store.UserStore, jwtSecret []byte) *
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("GET /{$}", s.handlerRoot)
-	mux.HandleFunc("GET /tasks", s.handleListTasks)
-	mux.HandleFunc("POST /tasks", s.handleCreateTask)
-	mux.HandleFunc("GET /tasks/{id}", s.handleGetTask)
-	mux.HandleFunc("PUT /tasks/{id}", s.handleChangeTask)
-	mux.HandleFunc("DELETE /tasks/{id}", s.handleDeleteTask)
 	mux.HandleFunc("POST /register", s.handleRegister)
 	mux.HandleFunc("POST /login", s.handleLogin)
+
+	mux.HandleFunc("GET /me", s.requireAuth(s.handleMe))
+	mux.HandleFunc("GET /tasks", s.requireAuth(s.handleListTasks))
+	mux.HandleFunc("POST /tasks", s.requireAuth(s.handleCreateTask))
+	mux.HandleFunc("GET /tasks/{id}", s.requireAuth(s.handleGetTask))
+	mux.HandleFunc("PUT /tasks/{id}", s.requireAuth(s.handleChangeTask))
+	mux.HandleFunc("DELETE /tasks/{id}", s.requireAuth(s.handleDeleteTask))
 	return mux
 }
 
@@ -234,4 +237,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	id, ok := auth.UserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"id": id})
 }

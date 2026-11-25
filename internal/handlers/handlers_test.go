@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gAgu507/tasks-api/internal/auth"
 	"github.com/gAgu507/tasks-api/internal/store"
@@ -107,10 +108,7 @@ func (f *fakeUsers) GetUserByEmail(ctx context.Context, email string) (store.Use
 
 // Test for Tasks
 func do(fs *fakeStore, method, path string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, nil)
-	rec := httptest.NewRecorder()
-	NewServer(fs, &fakeUsers{}, testSecret).Routes().ServeHTTP(rec, req)
-	return rec
+	return doBody(fs, method, path, "")
 }
 
 func TestRoot(t *testing.T) {
@@ -163,8 +161,12 @@ func TestListTasks_StoreError(t *testing.T) {
 }
 
 func doBody(fs *fakeStore, method, path, body string) *httptest.ResponseRecorder {
+	tok, _ := auth.NewToken(testSecret, 1, time.Hour)
+
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok)
+
 	rec := httptest.NewRecorder()
 	NewServer(fs, &fakeUsers{}, testSecret).Routes().ServeHTTP(rec, req)
 	return rec
