@@ -7,18 +7,21 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gAgu507/tasks-api/internal/auth"
 	"github.com/gAgu507/tasks-api/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
-	store store.TaskStore
-	users store.UserStore
+	store     store.TaskStore
+	users     store.UserStore
+	jwtSecret []byte
 }
 
-func NewServer(tasks store.TaskStore, users store.UserStore) *Server {
-	return &Server{store: tasks, users: users}
+func NewServer(tasks store.TaskStore, users store.UserStore, jwtSecret []byte) *Server {
+	return &Server{store: tasks, users: users, jwtSecret: jwtSecret}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -30,6 +33,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /tasks/{id}", s.handleChangeTask)
 	mux.HandleFunc("DELETE /tasks/{id}", s.handleDeleteTask)
 	mux.HandleFunc("POST /register", s.handleRegister)
+	mux.HandleFunc("POST /login", s.handleLogin)
 	return mux
 }
 
@@ -193,4 +197,41 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"id": user.ID, "email": user.Email})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+
+	user, err := s.users.GetUserByEmail(r.Context(), email)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "invalid email or password", http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		log.Println("get user:", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(in.Password))
+	if err != nil {
+		http.Error(w, "invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := auth.NewToken(s.jwtSecret, user.ID, 24*time.Hour)
+	if err != nil {
+		log.Println("create token:", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }

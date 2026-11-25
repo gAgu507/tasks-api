@@ -8,8 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gAgu507/tasks-api/internal/auth"
 	"github.com/gAgu507/tasks-api/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
+
+var testSecret = []byte("test-secret-test-secret-test-secret")
 
 type fakeStore struct {
 	tasks []store.Task
@@ -89,11 +93,23 @@ func (f *fakeUsers) CreateUser(ctx context.Context, email, hash string) (store.U
 	return u, nil
 }
 
+func (f *fakeUsers) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+	if f.err != nil {
+		return store.User{}, f.err
+	}
+	for _, u := range f.users {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return store.User{}, store.ErrNotFound
+}
+
 // Test for Tasks
 func do(fs *fakeStore, method, path string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, nil)
 	rec := httptest.NewRecorder()
-	NewServer(fs, &fakeUsers{}).Routes().ServeHTTP(rec, req)
+	NewServer(fs, &fakeUsers{}, testSecret).Routes().ServeHTTP(rec, req)
 	return rec
 }
 
@@ -150,7 +166,7 @@ func doBody(fs *fakeStore, method, path, body string) *httptest.ResponseRecorder
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	NewServer(fs, &fakeUsers{}).Routes().ServeHTTP(rec, req)
+	NewServer(fs, &fakeUsers{}, testSecret).Routes().ServeHTTP(rec, req)
 	return rec
 }
 
@@ -294,13 +310,61 @@ func TestRegister(t *testing.T) {
 			users := &fakeUsers{users: []store.User{{ID: 1, Email: "taken@example.com"}}}
 			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
-			NewServer(&fakeStore{}, users).Routes().ServeHTTP(rec, req)
+			NewServer(&fakeStore{}, users, testSecret).Routes().ServeHTTP(rec, req)
 
 			if rec.Code != tt.wantCode {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantCode)
 			}
-			if strings.Contains(rec.Body.String(), "password") {
-				t.Errorf("response leaks password data: %s", rec.Body.String())
+			if rec.Code == http.StatusCreated {
+				body := rec.Body.String()
+				if strings.Contains(body, "password") || strings.Contains(body, "$2") {
+					t.Errorf("response leaks password data: %s", body)
+				}
+			}
+		})
+	}
+}
+
+func TestLogin(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret123"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		body     string
+		wantCode int
+	}{
+		{"ok", `{"email":"anna@example.com","password":"secret123"}`, http.StatusOK},
+		{"email case ignored", `{"email":"ANNA@example.com","password":"secret123"}`, http.StatusOK},
+		{"wrong password", `{"email":"anna@example.com","password":"wrongpass"}`, http.StatusUnauthorized},
+		{"unknown email", `{"email":"bob@example.com","password":"secret123"}`, http.StatusUnauthorized},
+		{"broken json", `{`, http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			users := &fakeUsers{users: []store.User{
+				{ID: 7, Email: "anna@example.com", PasswordHash: string(hash)},
+			}}
+			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(tt.body))
+			rec := httptest.NewRecorder()
+			NewServer(&fakeStore{}, users, testSecret).Routes().ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantCode {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantCode)
+			}
+			if tt.wantCode != http.StatusOK {
+				return
+			}
+			var got struct{ Token string }
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("bad json: %v", err)
+			}
+			id, err := auth.ParseToken(testSecret, got.Token)
+			if err != nil || id != 7 {
+				t.Errorf("token user id = %d, err = %v, want 7", id, err)
 			}
 		})
 	}

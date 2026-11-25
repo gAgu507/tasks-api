@@ -36,7 +36,7 @@ func main() {
 	}
 
 	pg := store.NewPostgres(pool)
-	srv := handlers.NewServer(pg, pg)
+	srv := handlers.NewServer(pg, pg, []byte(cfg.JWTSecret))
 
 	log.Println("Server is running on http://localhost:" + cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, srv.Routes()))

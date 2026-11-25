@@ -31,4 +31,5 @@ type User struct {
 
 type UserStore interface {
 	CreateUser(ctx context.Context, email, passwordHash string) (User, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
 }

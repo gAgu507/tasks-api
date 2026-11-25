@@ -17,6 +17,8 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres {
 	return &Postgres{pool: pool}
 }
 
+// Implementation of UserStore interface
+
 func (s *Postgres) CreateUser(ctx context.Context, email, hash string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx,
@@ -30,6 +32,19 @@ func (s *Postgres) CreateUser(ctx context.Context, email, hash string) (User, er
 	}
 	return u, err
 }
+
+func (s *Postgres) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, email, password_hash FROM users WHERE email=$1`, email,
+	).Scan(&u.ID, &u.Email, &u.PasswordHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return u, err
+}
+
+// Implementation of TaskStore interface
 
 func (store *Postgres) List(ctx context.Context) ([]Task, error) {
 	rows, err := store.pool.Query(ctx, "SELECT id, title, description, completed FROM tasks ORDER BY id")
