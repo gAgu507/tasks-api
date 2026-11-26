@@ -46,8 +46,9 @@ func (s *Postgres) GetUserByEmail(ctx context.Context, email string) (User, erro
 
 // Implementation of TaskStore interface
 
-func (store *Postgres) List(ctx context.Context) ([]Task, error) {
-	rows, err := store.pool.Query(ctx, "SELECT id, title, description, completed FROM tasks ORDER BY id")
+func (store *Postgres) List(ctx context.Context, userID int) ([]Task, error) {
+	rows, err := store.pool.Query(ctx, `SELECT id, title, description, completed
+		 FROM tasks WHERE user_id=$1 ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,12 +71,12 @@ func (store *Postgres) List(ctx context.Context) ([]Task, error) {
 	return tasks, nil
 }
 
-func (store *Postgres) Create(ctx context.Context, task Task) (Task, error) {
+func (store *Postgres) Create(ctx context.Context, userID int, task Task) (Task, error) {
 	err := store.pool.QueryRow(ctx,
-		`INSERT INTO tasks (title, description, completed)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO tasks (title, description, completed, user_id)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, title, description, completed`,
-		task.Title, task.Description, task.Completed,
+		task.Title, task.Description, task.Completed, userID,
 	).Scan(&task.ID, &task.Title, &task.Description, &task.Completed)
 	if err != nil {
 		return Task{}, err
@@ -83,8 +84,9 @@ func (store *Postgres) Create(ctx context.Context, task Task) (Task, error) {
 	return task, nil
 }
 
-func (store *Postgres) Change(ctx context.Context, task Task) error {
-	tag, err := store.pool.Exec(ctx, "UPDATE tasks SET title=$1, description=$2, completed=$3 WHERE id=$4", task.Title, task.Description, task.Completed, task.ID)
+func (store *Postgres) Change(ctx context.Context, userID int, task Task) error {
+	tag, err := store.pool.Exec(ctx, `UPDATE tasks SET title=$1, description=$2, completed=$3 
+		WHERE id=$4 AND user_id=$5`, task.Title, task.Description, task.Completed, task.ID, userID)
 	if err != nil {
 		return err
 	}
@@ -94,8 +96,8 @@ func (store *Postgres) Change(ctx context.Context, task Task) error {
 	return nil
 }
 
-func (store *Postgres) Delete(ctx context.Context, id int) error {
-	tag, err := store.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1", id)
+func (store *Postgres) Delete(ctx context.Context, userID int, id int) error {
+	tag, err := store.pool.Exec(ctx, "DELETE FROM tasks WHERE id=$1 AND user_id=$2", id, userID)
 	if err != nil {
 		return err
 	}
@@ -105,10 +107,13 @@ func (store *Postgres) Delete(ctx context.Context, id int) error {
 	return nil
 }
 
-func (store *Postgres) Get(ctx context.Context, id int) (Task, error) {
+func (store *Postgres) Get(ctx context.Context, userID int, id int) (Task, error) {
 	var task Task
-	row := store.pool.QueryRow(ctx, "SELECT id, title, description, completed FROM tasks WHERE id=$1", id)
-	err := row.Scan(&task.ID, &task.Title, &task.Description, &task.Completed)
+	err := store.pool.QueryRow(ctx,
+		`SELECT id, title, description, completed
+		 FROM tasks WHERE id=$1 AND user_id=$2`, id, userID,
+	).Scan(&task.ID, &task.Title, &task.Description, &task.Completed)
+
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Task{}, ErrNotFound
 	}

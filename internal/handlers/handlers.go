@@ -46,7 +46,11 @@ func (s *Server) handlerRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	tasks, err := s.store.List(r.Context())
+	userID, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+	tasks, err := s.store.List(r.Context(), userID)
 	if err != nil {
 		log.Println("list tasks: ", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -63,7 +67,12 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := s.store.Get(r.Context(), id)
+	userID, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+
+	task, err := s.store.Get(r.Context(), userID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
@@ -90,7 +99,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
-	task, err := s.store.Create(r.Context(), store.Task{
+
+	userID, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+
+	task, err := s.store.Create(r.Context(), userID, store.Task{
 		Title:       in.Title,
 		Description: in.Description,
 	})
@@ -121,7 +136,12 @@ func (s *Server) handleChangeTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.store.Change(r.Context(), store.Task{
+	userID, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+
+	err = s.store.Change(r.Context(), userID, store.Task{
 		ID:          id,
 		Title:       in.Title,
 		Description: in.Description,
@@ -147,7 +167,12 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.store.Delete(r.Context(), id)
+	userID, ok := currentUser(w, r)
+	if !ok {
+		return
+	}
+
+	err = s.store.Delete(r.Context(), userID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
@@ -240,10 +265,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	id, ok := auth.UserID(r.Context())
+	userID, ok := currentUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"id": id})
+	writeJSON(w, http.StatusOK, map[string]int{"id": userID})
 }

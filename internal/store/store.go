@@ -16,11 +16,11 @@ type Task struct {
 }
 
 type TaskStore interface {
-	List(context.Context) ([]Task, error)
-	Create(context.Context, Task) (Task, error)
-	Change(context.Context, Task) error
-	Delete(context.Context, int) error
-	Get(context.Context, int) (Task, error)
+	List(ctx context.Context, userID int) ([]Task, error)
+	Create(ctx context.Context, userID int, t Task) (Task, error)
+	Change(ctx context.Context, userID int, t Task) error
+	Delete(ctx context.Context, userID int, id int) error
+	Get(ctx context.Context, userID int, id int) (Task, error)
 }
 
 type User struct {

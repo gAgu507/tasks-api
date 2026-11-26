@@ -14,47 +14,67 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const testUserID = 1
+
 var testSecret = []byte("test-secret-test-secret-test-secret")
 
 type fakeStore struct {
-	tasks []store.Task
-	err   error
+	tasks  []store.Task
+	owners map[int]int //map[task_id]owner_id
+	err    error
 }
 
-func (f *fakeStore) List(ctx context.Context) ([]store.Task, error) {
+func (f *fakeStore) owner(taskID int) int {
+	if o, ok := f.owners[taskID]; ok {
+		return o
+	}
+	return testUserID
+}
+
+func (f *fakeStore) List(ctx context.Context, userID int) ([]store.Task, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	return append([]store.Task{}, f.tasks...), nil
+	res := []store.Task{}
+	for _, t := range f.tasks {
+		if f.owner(t.ID) == userID {
+			res = append(res, t)
+		}
+	}
+	return res, nil
 }
 
-func (f *fakeStore) Get(ctx context.Context, id int) (store.Task, error) {
+func (f *fakeStore) Get(ctx context.Context, userID int, id int) (store.Task, error) {
 	if f.err != nil {
 		return store.Task{}, f.err
 	}
 	for _, t := range f.tasks {
-		if t.ID == id {
+		if t.ID == id && f.owner(t.ID) == userID {
 			return t, nil
 		}
 	}
 	return store.Task{}, store.ErrNotFound
 }
 
-func (f *fakeStore) Create(ctx context.Context, task store.Task) (store.Task, error) {
+func (f *fakeStore) Create(ctx context.Context, userID int, task store.Task) (store.Task, error) {
 	if f.err != nil {
 		return store.Task{}, f.err
 	}
 	task.ID = len(f.tasks) + 1
+	if f.owners == nil {
+		f.owners = map[int]int{}
+	}
+	f.owners[task.ID] = userID
 	f.tasks = append(f.tasks, task)
 	return task, nil
 }
 
-func (f *fakeStore) Change(ctx context.Context, task store.Task) error {
+func (f *fakeStore) Change(ctx context.Context, userID int, task store.Task) error {
 	if f.err != nil {
 		return f.err
 	}
 	for i, t := range f.tasks {
-		if t.ID == task.ID {
+		if t.ID == task.ID && f.owner(t.ID) == userID {
 			f.tasks[i] = task
 			return nil
 		}
@@ -62,12 +82,12 @@ func (f *fakeStore) Change(ctx context.Context, task store.Task) error {
 	return store.ErrNotFound
 }
 
-func (f *fakeStore) Delete(ctx context.Context, id int) error {
+func (f *fakeStore) Delete(ctx context.Context, userID int, id int) error {
 	if f.err != nil {
 		return f.err
 	}
 	for i, t := range f.tasks {
-		if t.ID == id {
+		if t.ID == id && f.owner(t.ID) == userID {
 			f.tasks = append(f.tasks[:i], f.tasks[i+1:]...)
 			return nil
 		}

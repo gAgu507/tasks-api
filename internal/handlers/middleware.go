@@ -25,3 +25,12 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		next(w, r.WithContext(auth.WithUserID(r.Context(), userID)))
 	}
 }
+
+func currentUser(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, ok := auth.UserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return 0, false
+	}
+	return id, true
+}
