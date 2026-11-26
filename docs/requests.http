@@ -1,0 +1,29 @@
+@base = http://localhost:8080
+
+### Регистрация
+POST {{base}}/register
+Content-Type: application/json
+
+{"email": "anna@example.com", "password": "secret123"}
+
+### Вход
+# @name login
+POST {{base}}/login
+Content-Type: application/json
+
+{"email": "anna@example.com", "password": "secret123"}
+
+### Создать задачу
+POST {{base}}/tasks
+Authorization: Bearer {{login.response.body.token}}
+Content-Type: application/json
+
+{"title": "Задача Анны"}
+
+### Список задач
+GET {{base}}/tasks
+Authorization: Bearer {{login.response.body.token}}
+
+### Кто я
+GET {{base}}/me
+Authorization: Bearer {{login.response.body.token}}

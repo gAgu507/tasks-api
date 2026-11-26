@@ -37,7 +37,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /tasks/{id}", s.requireAuth(s.handleGetTask))
 	mux.HandleFunc("PUT /tasks/{id}", s.requireAuth(s.handleChangeTask))
 	mux.HandleFunc("DELETE /tasks/{id}", s.requireAuth(s.handleDeleteTask))
-	return mux
+	return limitBody(mux)
 }
 
 // Part with handlers for Tasks.

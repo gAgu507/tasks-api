@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gAgu507/tasks-api/internal/store"
@@ -62,5 +64,32 @@ func TestCreate_AssignsCurrentUser(t *testing.T) {
 	}
 	if fs.owners[1] != testUserID {
 		t.Errorf("owner = %d, want %d", fs.owners[1], testUserID)
+	}
+}
+
+func TestStoreErrors_Give500AndHideDetails(t *testing.T) {
+	boom := errors.New("secret-db-detail")
+
+	tests := []struct {
+		name, method, path, body string
+	}{
+		{"list", http.MethodGet, "/tasks", ""},
+		{"get", http.MethodGet, "/tasks/1", ""},
+		{"create", http.MethodPost, "/tasks", `{"title":"x"}`},
+		{"put", http.MethodPut, "/tasks/1", `{"title":"x"}`},
+		{"delete", http.MethodDelete, "/tasks/1", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := doBody(&fakeStore{err: boom}, tt.method, tt.path, tt.body)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "secret-db-detail") {
+				t.Errorf("internal error leaked to client: %s", rec.Body.String())
+			}
+		})
 	}
 }

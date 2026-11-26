@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -389,5 +390,35 @@ func TestLogin(t *testing.T) {
 				t.Errorf("token user id = %d, err = %v, want 7", id, err)
 			}
 		})
+	}
+}
+
+func TestUserStoreErrors_Give500(t *testing.T) {
+	boom := errors.New("secret-db-detail")
+	users := &fakeUsers{err: boom}
+
+	for _, path := range []string{"/register", "/login"} {
+		t.Run(path, func(t *testing.T) {
+			body := `{"email":"a@example.com","password":"secret123"}`
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			rec := httptest.NewRecorder()
+			NewServer(&fakeStore{}, users, testSecret).Routes().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500", rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "secret-db-detail") {
+				t.Errorf("internal error leaked: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestBodyTooLarge(t *testing.T) {
+	big := `{"title":"` + strings.Repeat("a", 2<<20) + `"}`
+	rec := doBody(&fakeStore{}, http.MethodPost, "/tasks", big)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
